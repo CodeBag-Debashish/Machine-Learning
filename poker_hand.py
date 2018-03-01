@@ -4,7 +4,6 @@ import numpy as np
 import csv
 import itertools
 import pandas as pd
-
 class Neural_Network(object):
 
     def __init__(self,input_layer_size,hidden_layer_list,output_layer_size,learning_rate):
@@ -21,13 +20,16 @@ class Neural_Network(object):
         self.layers_dim.append(output_layer_size)
         # core data structure for the backprop algorithms to work
         self.W = [None]*(len(self.layers_dim))       # for weight matrices [None]*10
+        self.M = [None]*(len(self.layers_dim))
         self.a = [None]*(len(self.layers_dim))       # for activation(z) and outputs(a)
         self.b = [None]*(len(self.layers_dim))       # for activation(z) and outputs(a)
         self.delta = [None]*(len(self.layers_dim))
         
         for i in range(len(self.layers_dim)-1):
             self.W[i+1] = 2*np.random.random((self.layers_dim[i],self.layers_dim[i+1])) - 1
-        
+            self.M[i+1] = np.zeros((self.layers_dim[i],self.layers_dim[i+1]))
+
+        self.alpha = 0.1
         self.eta = learning_rate
 
     def forward_propagate(self,input,flag):
@@ -48,9 +50,10 @@ class Neural_Network(object):
             else:
                 self.delta[i+1] = self.delta[i].dot(self.W[ len(self.layers_dim) - i ].T) * sigmoid_prime(self.a[len(self.layers_dim) - i - 1]) 
 
-    def update_params(self,reg_param,reg_ON):
-        for i in range(len(self.layers_dim)-1):    
-            self.W[len(self.layers_dim) - i - 1] += self.eta*self.a[len(self.layers_dim) - i - 2].T.dot(self.delta[i+1]) - reg_ON*reg_param*self.W[len(self.layers_dim) - i - 1]
+    def update_params(self,reg_param,reg_ON,momen_ON):
+        for i in range(len(self.layers_dim)-1):
+            self.M[len(self.layers_dim) - i - 1] = self.alpha * momen_ON * self.M[len(self.layers_dim) - i - 1] + self.a[len(self.layers_dim) - i - 2].T.dot(self.delta[i+1])
+            self.W[len(self.layers_dim) - i - 1] += self.eta*self.M[len(self.layers_dim) - i - 1] - reg_ON*reg_param*self.W[len(self.layers_dim) - i - 1]
 
     def predict_classes(self):
         output = []
@@ -59,6 +62,10 @@ class Neural_Network(object):
             k = yHat[i].argmax()
             output.append([k])
         return np.array(output)
+
+    def predict_yHat(self):
+        return self.a[len(self.layers_dim) - 1]
+
 
 def augment_dataset(train_data):
     new_dataset = []
@@ -120,11 +127,15 @@ def select_good_dataset(train_data):
     cnt_mx = [60000,60000,30000,30000,30000,30000,30000,30000,30000,30000]
     new_dataset = []
     for i in range(len(train_data)):
+
         for class_no in range(10):
+            
             if train_data[i][-1] == class_no:
+                
                 if cnt[class_no] <= cnt_mx[class_no]:
                     cnt[class_no] = cnt[class_no] + 1
                     new_dataset.append(train_data[i])
+
     return new_dataset
 
 # suffle the given dataset
@@ -214,42 +225,152 @@ def vectorize_lebel(test_input):
     test_input = np.array(test_input)
     return test_input
 
-def model(Network,X,Y,test_input,epoch,reg_param,reg_ON):
+def model(Network,X,Y,test_input,epoch,reg_param,reg_ON,momen_ON,n_fold):
 
-    # SGD 
-    print("Training is about to start ...")
-    print("Train data set size = ", len(X))
-    print("No of epoch = ", epoch)
-    if reg_ON:
-        print("Regularization turned ON with reg_param = ",reg_param)
-    else:
-        print("Regularization turned OFF")
+    
+
+    # active this code for vest result
+
+    train_network(Network,X,Y,epoch,reg_param,reg_ON,momen_ON)
+    output = predict_output(Network,test_input,True)
+    write_to_csv(output)
+
+
+
+    # Active this code for cross_validation
+
+    # results = cross_validation(Network,X.tolist(),Y.tolist(),epoch,reg_param,reg_ON,momen_ON,n_fold)
+    
+    # #print(results)
+    
+    # output = pd.DataFrame(results[:,:],columns=['learning_rate','no of hidden layers','reg_lambda','cost'])
+    # output.index.name = "No."
+    # output.to_csv("table1.csv")   
+    # print("file_written !! ok done !")
+
+    # create a table from this result value
+
+
+
+def train_network(Network,X,Y,epoch,reg_param,reg_ON,momen_ON):
+    
+
+    # print("\tTraining is about to start ...")
+    # print("\tTrain data set size = ", len(X))
+    # print("\tNo of epoch = ", epoch)
+    # print("\tReg Param = ", reg_param)
+    # print("\tLearning Rate = ", Network.eta)
+    # print("\tNo of hidden layers = ",len(Network.layers_dim) - 2)
+    
+    # if reg_ON:
+    #     print("\tRegularization turned ON with reg_param = ",reg_param)
+    # else:
+    #     print("\tRegularization turned OFF")
 
     for j in range(epoch):
-        print("epoch ",j+1," started ...")
+        print("\tepoch ",j+1," started ...")
         for k in range(len(X)):    
-            
             Network.forward_propagate(X[k],True)
             Network.backward_propagate(Y[k])
-            Network.update_params(reg_param,reg_ON)
+            Network.update_params(reg_param,reg_ON,momen_ON)
 
-    print("Training done !")
+    print("\tTraining done !")    
+
+def predict_output(Network,test_input,as_class):
 
     Network.forward_propagate(test_input,False)
-    output = Network.predict_classes()
+    
+    if as_class:
+        output = Network.predict_classes()
+    else:
+        output = Network.predict_yHat()
+    
+    return output
+
+def write_to_csv(output):
+
     output = pd.DataFrame(output[:,0].astype(int),columns=['predicted_class'])
     output.index.name = "id"
-    output.to_csv("out.csv")
+    output.to_csv("out.csv")    
 
 
-def cross_validation(X,n_fold):
+def cross_validation(Network,X,Y,epoch,reg_param,reg_ON,momen_ON,n_fold):
+
+    fold_size = (int)(len(X)/n_fold)
+
+    # learning_rate = [0.1,0.01,0.001,0.0001,0.00001]
+    # hidden_layer = [[20,20],[20,20,20],[20,20,20,20]]
+    # reg_param = [0.001,0.0001,0.00001]
+
+    learning_rate = [0.1]
+    hidden_layer = [[20,20]]
+    reg_param = [0.001]
+
+    results = []
+
+    for i in range(len(learning_rate)):
+        for j in range(len(hidden_layer)):            
+            for k in range(len(reg_param)):
+
+                cost_value = 10000000000
+                
+                print("Learning rate = ",learning_rate[i]," No of hidden_layer = ",len(hidden_layer[j])," reg_param = ",reg_param[k])
+
+                for x in range(n_fold):
+                    
+                    x = 0
+
+                    if x == (n_fold - 1):
+                        test_data = np.array(X[x:])
+                        test_label = np.array(Y[x:])
+                        train_data = np.array(X[0:x])
+                        train_label = np.array(Y[0:x])
+
+                    else:
+
+                        test_data = np.array(X[x:x+fold_size])
+                        test_label = np.array(Y[x:x+fold_size])
+                        train_data = np.array(X[0:x] + X[x+fold_size:])
+                        train_label = np.array(Y[0:x] + Y[x+fold_size:])
+
+                    input_layer_size = 85
+                    output_layer_size = 10
+
+                    Network = Neural_Network(input_layer_size,hidden_layer[j],output_layer_size,learning_rate[i])
+                    train_network(Network,train_data,train_label,epoch,reg_param[k],reg_ON,momen_ON)
+                    output = predict_output(Network,test_data,False)
+                    
 
 
+                    val = compute_cost(Network,test_label,output,reg_param[k],fold_size)
+                    
+                    if(val < cost_value):
+                        cost_value = val                 
+                    print("cost value = ",cost_value)
+                    x = x + fold_size
 
-    return 0
+                results.append([learning_rate[i],len(hidden_layer[j]),reg_param[k],cost_value])
 
-def cost():
-    return 0
+    return np.array(results)
+
+def compute_cost(Network,actual, predicted,reg_param,fold_size):
+
+    cost = 0
+
+    for i in range(len(actual)):
+        k = actual[i].argmax()
+        p = predicted[i][k]
+        cost += -np.log(p)
+
+    cost = np.squeeze(cost) / len(actual) 
+    temp = 0
+    for i in range(len(Network.layers_dim)-1):
+        temp += np.sum(np.square(Network.W[i+1]))
+
+    temp = (reg_param/(2*fold_size))*temp
+    cost += temp
+
+    return cost
 
 def main(argv):
 
@@ -277,15 +398,17 @@ def main(argv):
     print("Test data vectorized ...")
 
     input_layer_size = 85
-    hidden_layer_list = [100,100]
+    hidden_layer_list = [50,50] # for one time test
     output_layer_size = 10
-    learning_rate = 0.01
-    reg_param = 0.00001
-    reg_ON = 0
-    epoch = 150
+    learning_rate = 0.1 # for one time test
+    reg_param = 0.00001 # for one time test
+    reg_ON = 1
+    momen_ON = 1
+    epoch = 3
+    n_fold = 5
 
     NN = Neural_Network(input_layer_size,hidden_layer_list,output_layer_size,learning_rate)
-    model(NN,X,Y,test_input,epoch,reg_param,reg_ON)
+    model(NN,X,Y,test_input,epoch,reg_param,reg_ON,momen_ON,n_fold)
 
 if __name__ == "__main__":
     main(sys.argv)
